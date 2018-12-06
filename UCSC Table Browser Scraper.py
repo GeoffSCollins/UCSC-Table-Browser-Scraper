@@ -1,9 +1,3 @@
-'''
-Ideas:
-    IF User doesn't enter things in
-    Automatically import to excel
-'''
-
 import time
 import os
 from selenium import webdriver
@@ -11,11 +5,12 @@ from selenium.webdriver.support.ui import Select
 from bs4 import BeautifulSoup
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox
 import datetime
 import sys
 
-class TableBrowserStats(tk.Tk):
 
+class TableBrowserStats(tk.Tk):
     # Making all of the GUI components
     def __init__(self):
         self.master = tk.Toplevel()
@@ -40,25 +35,36 @@ class TableBrowserStats(tk.Tk):
         tableBrowserURL = str(self.inputBoxURL.get("1.0", tk.END))
         tableBrowserURL = tableBrowserURL.rstrip()
 
-        with open('Gene File From Script.txt', 'w') as geneFile:
-            geneFile.write(self.inputBox.get("1.0", tk.END))
+        regionsBoxText = self.inputBox.get("1.0", tk.END).rstrip()
+        if regionsBoxText:
+            with open('Gene File From Script.txt', 'w') as geneFile:
+                geneFile.write(self.inputBox.get("1.0", tk.END))
+            self.master.destroy()
+            self.makeProgressBar()
 
-        self.master.destroy()
-        self.makeProgressBar()
-        self.getStatistics(self, tableBrowserURL)
+            try:
+                self.driver = webdriver.Chrome(os.getcwd() + "/chromedriver.exe")
+                self.getStatistics(self, tableBrowserURL)
+            except Exception as e:
+                self.driver.quit()
+                self.progressBar.close()
+                restartBox(e)
+
+        else:
+            restartBox("The regions box was empty.")
+            self.master.destroy()
 
     def makeProgressBar(self):
         self.progressBar = ProgressBar()
         self.progressBar.updateProgressBar(0)
 
-    #Main program that actually retrieves data from UCSC Table Browser
+    # Main program that actually retrieves data from UCSC Table Browser
     @staticmethod
     def getStatistics(self, URL):
-        driver = webdriver.Chrome(os.getcwd() + "/chromedriver.exe" )
-        driver.get(URL)
+        self.driver.get(URL)
 
-        #This gets the names of the tracks
-        select_box = driver.find_element_by_name("hgta_track")
+        # This gets the names of the tracks
+        select_box = self.driver.find_element_by_name("hgta_track")
         optionsArr = [x for x in select_box.find_elements_by_tag_name("option")]
         nameArr = [0] * len(optionsArr)
 
@@ -66,20 +72,19 @@ class TableBrowserStats(tk.Tk):
             element = optionsArr[i]
             nameArr[i] = element.get_attribute("value")
 
-        numLines = sum(1 for line in open('Gene File From Script.txt') if not len(line.strip()) == 0) # Gets lines that have regions in them
+        # Get lines that have regions in them
+        numLines = sum(1 for line in open('Gene File From Script.txt') if not len(line.strip()) == 0)
 
         with open('Gene File From Script.txt', 'r') as geneFile:
             for lineNum, line in enumerate(geneFile):
-                regionsCompletion = lineNum / numLines
-
                 geneName = line.split()[0]
                 region = line.split()[1]
 
-                regionElement = driver.find_element_by_name("position")
+                regionElement = self.driver.find_element_by_name("position")
                 regionElement.clear()
                 regionElement.send_keys(region)
 
-                select = Select(driver.find_element_by_id("hgta_track"))
+                select = Select(self.driver.find_element_by_id("hgta_track"))
                 options = select.options
 
                 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -93,13 +98,13 @@ class TableBrowserStats(tk.Tk):
                             self.progressBar.setFinishTime(int(numLines * len(options)))
 
                         trackName = nameArr[index]
-                        select = Select(driver.find_element_by_id("hgta_track"))
+                        select = Select(self.driver.find_element_by_id("hgta_track"))
                         options = select.options
 
                         select.select_by_index(index)
-                        driver.find_element_by_name('hgta_doSummaryStats').click()
+                        self.driver.find_element_by_name('hgta_doSummaryStats').click()
 
-                        file = driver.page_source
+                        file = self.driver.page_source
 
                         soup = BeautifulSoup(file, 'html.parser')
 
@@ -109,7 +114,6 @@ class TableBrowserStats(tk.Tk):
                         startPosFirst = meanLine.find('n')+1
                         mean = float(meanLine[startPosFirst:])
 
-                        startSecondLine = goodText.find("min")
                         minLine = goodText.split('\n')[1]
                         startPosSec = minLine.find('n') + 1
                         min = float(minLine[startPosSec:])
@@ -119,21 +123,22 @@ class TableBrowserStats(tk.Tk):
                         startPosThird = maxLine.find('x') + 1
                         max = float(maxLine[startPosThird:])
 
-                        #print data to another file
+                        # Print data to another file
                         outputFile.write(str(geneName) + '\t' + str(trackName) + '\t'+ str(region) + '\t' + str(mean) + '\t' + str(min) + '\t' + str(max) + '\n')
 
                         time.sleep(10)
-                        driver.execute_script("window.history.go(-1)")
+                        self.driver.execute_script("window.history.go(-1)")
                         percentComplete = (index + 1) / len(options)
                         self.progressBar.updateProgressBar(percentComplete/numLines)
                         time.sleep(5)
 
-                    sys.exit(0)
+        self.driver.quit()
+        sys.exit(0)
 
 class ProgressBar(tk.Tk):
     def __init__(self):
         self.popup = tk.Toplevel()
-        self.popup.geometry("200x60")
+        self.popup.geometry("200x60+300+300")
         self.popup.title("Progress")
 
         self.progress = ttk.Progressbar(self.popup, orient="horizontal", length=200, mode="determinate")
@@ -162,6 +167,20 @@ class ProgressBar(tk.Tk):
         self.finishText.config(text="Finish time: " + str(self.finishTime.time().replace(microsecond=0)))
         self.finishText.pack()
         tk.Tk.update(self.popup)
+
+    def close(self):
+        self.popup.destroy()
+
+class restartBox(tk.Tk):
+
+    def __init__(self, error):
+        self.result = messagebox.askyesno("Do you want to restart?", "This error occured: " + str(error) + "\nDo you want to restart?", icon='warning')
+
+        if self.result:
+            TableBrowserStats()
+        else:
+            sys.exit(1)
+
 
 if __name__ == "__main__":
     if not os.path.exists(os.getcwd() + "/Output"):
